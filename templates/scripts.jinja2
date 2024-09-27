@@ -1,0 +1,236 @@
+    <script>
+        new Vue({
+            el: '#app',
+            delimiters: ['[[', ']]'],
+            data: {
+                sensors: [],
+                nodes: [],
+                sensorTypeChart: null,
+                nodeComplexityChart: null,
+                realtimeSensorCharts: {},
+                nodeSensorCounts: {},
+                realtimeSensorData: {},
+                sensorDataHistory: {},
+                maxDataPoints: 30
+            },
+            methods: {
+                fetchSensors() {
+                    axios.get('/sensors')
+                        .then(response => {
+                            this.sensors = response.data;
+                            this.updateSensorTypeChart();
+                        })
+                        .catch(error => {
+                            console.error('Error fetching sensors:', error);
+                        });
+                },
+                fetchNodes() {
+                    axios.get('/nodes')
+                        .then(response => {
+                            this.nodes = response.data;
+                            this.fetchNodeSensorCounts();
+                        })
+                        .catch(error => {
+                            console.error('Error fetching nodes:', error);
+                        });
+                },
+                fetchNodeSensorCounts() {
+                    axios.get('/nodes_sensors_count')
+                        .then(response => {
+                            this.nodeSensorCounts = response.data;
+                            this.updateNodeComplexityChart();
+                        })
+                        .catch(error => {
+                            console.error('Error fetching node sensor counts:', error);
+                        });
+                },
+                updateSensorTypeChart() {
+                    const sensorTypeCounts = {};
+                    this.sensors.forEach(sensor => {
+                        sensorTypeCounts[sensor.sensor_type] = (sensorTypeCounts[sensor.sensor_type] || 0) + 1;
+                    });
+
+                    const sortedTypes = Object.keys(sensorTypeCounts).sort((a, b) => sensorTypeCounts[b] - sensorTypeCounts[a]);
+                    const data = sortedTypes.map(type => sensorTypeCounts[type]);
+
+                    if (this.sensorTypeChart) {
+                        this.sensorTypeChart.destroy();
+                    }
+
+                    const ctx = document.getElementById('sensorTypeChart').getContext('2d');
+                    this.sensorTypeChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: sortedTypes,
+                            datasets: [{
+                                label: 'Number of Sensors',
+                                data: data,
+                                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Count'
+                                    }
+                                },
+                                x: {
+                                    title: {
+                                        display: true,
+                                        text: 'Sensor Type'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: 'Sensor Types Distribution'
+                                }
+                            }
+                        }
+                    });
+                },
+                updateNodeComplexityChart() {
+                    const complexityDistribution = {};
+                    Object.values(this.nodeSensorCounts).forEach(count => {
+                        complexityDistribution[count] = (complexityDistribution[count] || 0) + 1;
+                    });
+
+                    const sortedComplexities = Object.keys(complexityDistribution).sort((a, b) => parseInt(a) - parseInt(b));
+                    const data = sortedComplexities.map(complexity => complexityDistribution[complexity]);
+
+                    if (this.nodeComplexityChart) {
+                        this.nodeComplexityChart.destroy();
+                    }
+
+                    const ctx = document.getElementById('nodeComplexityChart').getContext('2d');
+                    this.nodeComplexityChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: sortedComplexities.map(c => `${c} Sensor${c > 1 ? 's' : ''}`),
+                            datasets: [{
+                                label: 'Number of Nodes',
+                                data: data,
+                                backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Number of Nodes'
+                                    }
+                                },
+                                x: {
+                                    title: {
+                                        display: true,
+                                        text: 'Number of Sensors per Node'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: 'Node Complexity Distribution'
+                                }
+                            }
+                        }
+                    });
+                },
+                startSensorDataStream() {
+                    const eventSource = new EventSource("/stream-sensor-data");
+                    eventSource.onmessage = (event) => {
+                        const newData = JSON.parse(event.data);
+                        this.realtimeSensorData = newData;
+                        this.updateSensorDataHistory(newData);
+                        this.updateRealtimeSensorCharts();
+                    };
+                },
+                updateSensorDataHistory(newData) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    Object.entries(newData).forEach(([sensorType, value]) => {
+                        if (!this.sensorDataHistory[sensorType]) {
+                            this.sensorDataHistory[sensorType] = [];
+                        }
+                        this.sensorDataHistory[sensorType].push({ x: timestamp, y: value });
+                        if (this.sensorDataHistory[sensorType].length > this.maxDataPoints) {
+                            this.sensorDataHistory[sensorType].shift();
+                        }
+                    });
+                },
+                updateRealtimeSensorCharts() {
+                    Object.entries(this.sensorDataHistory).forEach(([sensorType, data]) => {
+                        if (!this.realtimeSensorCharts[sensorType]) {
+                            this.createRealtimeSensorChart(sensorType);
+                        }
+                        this.realtimeSensorCharts[sensorType].data.labels = data.map(d => d.x);
+                        this.realtimeSensorCharts[sensorType].data.datasets[0].data = data.map(d => d.y);
+                        this.realtimeSensorCharts[sensorType].update();
+                    });
+                },
+                createRealtimeSensorChart(sensorType) {
+                    const chartContainer = document.createElement('div');
+                    chartContainer.className = 'col-md-6 mb-4';
+                    chartContainer.innerHTML = `<canvas id="realtimeChart_${sensorType}"></canvas>`;
+                    document.getElementById('realtimeCharts').appendChild(chartContainer);
+
+                    const ctx = document.getElementById(`realtimeChart_${sensorType}`).getContext('2d');
+                    this.realtimeSensorCharts[sensorType] = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: [],
+                            datasets: [{
+                                label: sensorType,
+                                data: [],
+                                borderColor: this.getRandomColor(),
+                                fill: false
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                x: {
+                                    type: 'category',
+                                    title: {
+                                        display: true,
+                                        text: 'Time'
+                                    }
+                                },
+                                y: {
+                                    title: {
+                                        display: true,
+                                        text: 'Sensor Value'
+                                    }
+                                }
+                            },
+                            animation: {
+                                duration: 0
+                            },
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: `Real-time ${sensorType} Values`
+                                }
+                            }
+                        }
+                    });
+                },
+                getRandomColor() {
+                    return '#' + Math.floor(Math.random()*16777215).toString(16);
+                }
+            },
+            mounted() {
+                this.fetchSensors();
+                this.fetchNodes();
+                this.startSensorDataStream();
+            }
+        });
+    </script>
