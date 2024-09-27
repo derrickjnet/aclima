@@ -12,8 +12,8 @@ This project consists of a RESTful API for managing Aclima nodes and sensors, bu
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/aclima-api.git
-   cd aclima-api
+   git clone https://github.com/derrickjnet/aclima.git
+   cd aclima
    ```
 
 2. Create a virtual environment:
